@@ -1,0 +1,24 @@
+# Virtual Environment
+guardrail/
+venv/
+env/
+ENV/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment Variables & Secrets
+.env
+*.env
+
+# IDE / Editor Files
+.vscode/
+.idea/
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/
