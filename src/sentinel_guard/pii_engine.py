@@ -2,11 +2,24 @@ import re
 from typing import Dict, List, Tuple
 
 PII_PATTERNS: Dict[str, re.Pattern] = {
-    "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
-    "PHONE_US": re.compile(r"\b(?:\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ]?[0-9]{3}[-. ]?[0-9]{4}\b"),
-    "SSN": re.compile(r"\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"),
-    "CREDIT_CARD": re.compile(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b"),
-    "API_KEY": re.compile(r"\b(?:sk-[a-zA-Z0-9]{20,48}|ghp_[a-zA-Z0-9]{36})\b")
+    "EMAIL": re.compile(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+    ),
+    "PHONE_US": re.compile(
+        r"\b(?:\+?1[-. ]?)?\(?[0-9]{3}\)?[-. ]?[0-9]{3}[-. ]?[0-9]{4}\b"
+    ),
+    "SSN": re.compile(
+        r"\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"
+    ),
+    "AADHAAR": re.compile(
+        r"\b[2-9]\d{3}[-\s]?\d{4}[-\s]?\d{4}\b"
+    ),
+    "CREDIT_CARD": re.compile(
+        r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b"
+    ),
+    "API_KEY": re.compile(
+        r"\b(?:sk-[a-zA-Z0-9]{20,48}|ghp_[a-zA-Z0-9]{36})\b"
+    )
 }
 
 
@@ -22,7 +35,7 @@ def scan_pii(text: str) -> Tuple[bool, Dict[str, List[str]]]:
 
 def mask_pii(text: str) -> Tuple[str, Dict[str, str]]:
     """
-    Replaces sensitive entities with indexed semantic tokens (<EMAIL_1>, etc.)
+    Replaces sensitive entities with indexed semantic tokens (<EMAIL_1>, <AADHAAR_1>, etc.)
     and returns the anonymized text along with the session vault.
     """
     anonymized = text
