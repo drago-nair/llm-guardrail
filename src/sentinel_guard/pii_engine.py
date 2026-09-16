@@ -24,38 +24,76 @@ PII_PATTERNS: Dict[str, re.Pattern] = {
 
 
 def scan_pii(text: str) -> Tuple[bool, Dict[str, List[str]]]:
-    """Scans text and returns detected PII matches categorized by type."""
+    """
+    Scans text and returns detected PII matches categorized by type.
+
+    Returns:
+        A tuple containing:
+        1. Whether the text is free from recognized PII.
+        2. A dictionary containing the detected PII.
+    """
     findings: Dict[str, List[str]] = {}
+
     for pii_type, pattern in PII_PATTERNS.items():
         matches = pattern.findall(text)
+
         if matches:
             findings[pii_type] = matches
+
     return len(findings) == 0, findings
 
 
 def mask_pii(text: str) -> Tuple[str, Dict[str, str]]:
     """
-    Replaces sensitive entities with indexed semantic tokens (<EMAIL_1>, <AADHAAR_1>, etc.)
-    and returns the anonymized text along with the session vault.
+    Replaces sensitive entities with indexed semantic tokens.
+
+    Examples:
+        First email  -> <EMAIL_1>
+        Second email -> <EMAIL_2>
+
+    Repeated appearances of the same value reuse the same token.
+
+    Returns:
+        A tuple containing:
+        1. The anonymized text.
+        2. The temporary token-to-original-value vault.
     """
     anonymized = text
     vault: Dict[str, str] = {}
-    counters = {k: 0 for k in PII_PATTERNS.keys()}
 
     for pii_type, pattern in PII_PATTERNS.items():
-        matches = set(pattern.findall(anonymized))
-        for m in matches:
-            counters[pii_type] += 1
-            token = f"<{pii_type}_{counters[pii_type]}>"
-            vault[token] = m
-            anonymized = anonymized.replace(m, token)
+        value_to_token: Dict[str, str] = {}
+        counter = 0
+
+        def replace_match(match: re.Match[str]) -> str:
+            nonlocal counter
+
+            original_value = match.group(0)
+
+            if original_value not in value_to_token:
+                counter += 1
+                token = f"<{pii_type}_{counter}>"
+
+                value_to_token[original_value] = token
+                vault[token] = original_value
+
+            return value_to_token[original_value]
+
+        anonymized = pattern.sub(replace_match, anonymized)
 
     return anonymized, vault
 
 
-def unmask_text(anonymized_text: str, vault: Dict[str, str]) -> str:
-    """Restores tokens back to original values from vault mapping."""
+def unmask_text(
+    anonymized_text: str,
+    vault: Dict[str, str]
+) -> str:
+    """
+    Restores anonymized tokens using the supplied temporary vault.
+    """
     restored = anonymized_text
+
     for token, original_value in vault.items():
         restored = restored.replace(token, original_value)
+
     return restored
