@@ -1,0 +1,30 @@
+[build-system]
+requires = [
+    "setuptools>=75,<82",
+    "wheel>=0.44,<1",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-guard"
+version = "0.1.0"
+description = "CPU-efficient security and sanitization pipeline for LLM prompts."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "sentence-transformers==6.0.1",
+    "torch==2.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
