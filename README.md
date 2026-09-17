@@ -2,7 +2,7 @@
 
 Sentinel Guard is a CPU-oriented Python security pipeline that inspects, normalizes, decodes, and anonymizes prompts before they are sent to a Large Language Model (LLM).
 
-> **Current status:** Educational pre-release. The deterministic four-gate orchestrator is implemented and tested. The Semantic Shield exists as a standalone component and will be integrated as Gate 5 in Milestone 18.
+> > **Current status:** Educational pre-release. The complete five-gate prompt pipeline is implemented. The Semantic Shield is integrated into the orchestrator with lazy loading, shared model reuse, decoded-payload inspection, and fail-closed error handling.
 
 ## 🚦 Current Pipeline
 
@@ -52,7 +52,7 @@ llm-guardrail/
 
 Sentinel Guard is a CPU-oriented Python security pipeline that inspects, normalizes, decodes, and anonymizes prompts before they are sent to a Large Language Model (LLM).
 
-> **Current status:** Educational pre-release. The deterministic four-gate orchestrator is implemented and tested. The Semantic Shield exists as a standalone component and will be integrated as Gate 5 in Milestone 18.
+>  **Current status:** Educational pre-release. The complete five-gate prompt pipeline is implemented. The Semantic Shield is integrated into the orchestrator with lazy loading, shared model reuse, decoded-payload inspection, and fail-closed error handling.
 
 ## 🚦 Current Pipeline
 
@@ -60,7 +60,7 @@ Sentinel Guard is a CPU-oriented Python security pipeline that inspects, normali
 2. **Obfuscation Decoder** — Recursive Base64 and hexadecimal inspection with depth, decoded-size, and payload-count limits.
 3. **Keyword Shield** — Case-insensitive, boundary-aware attack-phrase matching.
 4. **PII Engine** — Conservative masking, deterministic positional tokens, reversible request-scoped vaulting, and checksum-confidence metadata.
-5. **Semantic Shield** — Implemented and tested independently; orchestrator integration is the next milestone.
+5. **Semantic Shield** — Compares the sanitized prompt and decoded payloads against pinned attack-signature embeddings using cosine similarity.
 
 ## ✨ Implemented Protections
 
@@ -99,3 +99,7 @@ llm-guardrail/
 ├── .python-version
 ├── pyproject.toml
 └── README.md
+
+## 🗺️ Next Milestone
+
+**Milestone 19:** Add permanent five-gate integration tests covering semantic rejection, decoded semantic attacks, PII-before-semantic ordering, lazy loading, model reuse, encoded PII, and fail-closed model errors.
