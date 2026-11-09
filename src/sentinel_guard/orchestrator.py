@@ -1,6 +1,7 @@
 from threading import Lock
 from typing import Dict, List, NamedTuple, Protocol
 
+from sentinel_guard.classifier_policy import decide
 from sentinel_guard.decoder import scan_obfuscated_content
 from sentinel_guard.keyword_shield import check_keywords
 from sentinel_guard.normalizer import normalize_and_validate
@@ -27,6 +28,28 @@ class SemanticShieldLike(Protocol):
         ...
 
 
+class ClassifierScanResultLike(Protocol):
+    """Minimum classifier result interface required by the orchestrator."""
+
+    model_label: str
+    benign_score: float
+    malicious_score: float
+    confidence: float
+    model_name: str
+    model_revision: str | None
+
+
+class ClassifierShieldLike(Protocol):
+    """Minimum classifier scanner interface required by the orchestrator."""
+
+    def scan(
+        self,
+        prompt: str,
+    ) -> ClassifierScanResultLike:
+        """Scores one prompt and returns raw classifier evidence."""
+        ...
+
+
 class PipelineResult(NamedTuple):
     is_allowed: bool
     processed_prompt: str
@@ -37,6 +60,9 @@ class PipelineResult(NamedTuple):
 
 _default_semantic_shield: SemanticShieldLike | None = None
 _semantic_shield_lock = Lock()
+
+_default_classifier_shield: ClassifierShieldLike | None = None
+_classifier_shield_lock = Lock()
 
 
 def _get_default_semantic_shield() -> SemanticShieldLike:
@@ -53,18 +79,34 @@ def _get_default_semantic_shield() -> SemanticShieldLike:
     return _default_semantic_shield
 
 
+def _get_default_classifier_shield() -> ClassifierShieldLike:
+    """Lazily creates one shared Classifier Shield instance."""
+    global _default_classifier_shield
+
+    if _default_classifier_shield is None:
+        with _classifier_shield_lock:
+            if _default_classifier_shield is None:
+                from sentinel_guard.classifier_shield import ClassifierShield
+
+                _default_classifier_shield = ClassifierShield()
+
+    return _default_classifier_shield
+
+
 def run_guardrail_pipeline(
     raw_prompt: str,
     semantic_shield: SemanticShieldLike | None = None,
+    classifier_shield: ClassifierShieldLike | None = None,
 ) -> PipelineResult:
     """
-    Executes the five-gate prompt security pipeline.
+    Executes the six-gate prompt security pipeline.
 
     Gate 1: Normalize and validate input.
     Gate 2: Decode and inspect obfuscated content.
     Gate 3: Detect direct blocked keywords.
     Gate 4: Mask direct PII and block encoded PII.
     Gate 5: Detect semantic similarity to known attack intents.
+    Gate 6: Classify prompt-injection intent and apply ALLOW/REVIEW/BLOCK policy.
     """
     audit_flags: List[str] = []
 
@@ -160,6 +202,27 @@ def run_guardrail_pipeline(
             f"PII_REDACTED ({len(vault)} entities)"
         )
 
+    # Targets inspected by both the semantic (Gate 5) and classifier
+    # (Gate 6) shields: the visible prompt plus anything the decoder
+    # recovered from obfuscated content.
+    scan_targets = [
+        (
+            "prompt",
+            safe_prompt,
+        )
+    ]
+
+    scan_targets.extend(
+        (
+            (
+                f"decoded_{payload.encoding.lower()}"
+                f"_depth_{payload.depth}"
+            ),
+            payload.decoded_text,
+        )
+        for payload in decoder_result.decoded_payloads
+    )
+
     # Gate 5: Semantic similarity inspection
     try:
         active_semantic_shield = (
@@ -168,25 +231,7 @@ def run_guardrail_pipeline(
             else _get_default_semantic_shield()
         )
 
-        semantic_targets = [
-            (
-                "prompt",
-                safe_prompt,
-            )
-        ]
-
-        semantic_targets.extend(
-            (
-                (
-                    f"decoded_{payload.encoding.lower()}"
-                    f"_depth_{payload.depth}"
-                ),
-                payload.decoded_text,
-            )
-            for payload in decoder_result.decoded_payloads
-        )
-
-        for source, target_text in semantic_targets:
+        for source, target_text in scan_targets:
             semantic_result = active_semantic_shield.scan(
                 target_text
             )
@@ -227,6 +272,62 @@ def run_guardrail_pipeline(
             audit_flags=audit_flags,
         )
 
+    # Gate 6: Classifier-based attack detection
+    try:
+        active_classifier_shield = (
+            classifier_shield
+            if classifier_shield is not None
+            else _get_default_classifier_shield()
+        )
+
+        for source, target_text in scan_targets:
+            classifier_result = active_classifier_shield.scan(
+                target_text
+            )
+            policy_decision = decide(classifier_result.malicious_score)
+
+            if policy_decision.decision == "BLOCK":
+                audit_flags.append(
+                    "CLASSIFIER_ATTACK_BLOCKED "
+                    f"(source={source}, "
+                    f"score={classifier_result.malicious_score:.4f})"
+                )
+
+                return PipelineResult(
+                    is_allowed=False,
+                    processed_prompt=safe_prompt,
+                    rejection_reason=(
+                        "Classifier Gate: prompt classified as a "
+                        "prompt-injection attack."
+                    ),
+                    anonymization_vault={},
+                    audit_flags=audit_flags,
+                )
+
+            if policy_decision.decision == "REVIEW":
+                audit_flags.append(
+                    "CLASSIFIER_REVIEW_FLAGGED "
+                    f"(source={source}, "
+                    f"score={classifier_result.malicious_score:.4f})"
+                )
+
+    except Exception as error:
+        audit_flags.append(
+            f"CLASSIFIER_GATE_ERROR "
+            f"({type(error).__name__})"
+        )
+
+        return PipelineResult(
+            is_allowed=False,
+            processed_prompt=safe_prompt,
+            rejection_reason=(
+                "Classifier Gate: security model unavailable; "
+                "request blocked by fail-closed policy."
+            ),
+            anonymization_vault={},
+            audit_flags=audit_flags,
+        )
+
     return PipelineResult(
         is_allowed=True,
         processed_prompt=safe_prompt,
@@ -239,9 +340,11 @@ def run_guardrail_pipeline(
 def run_deterministic_pipeline(
     raw_prompt: str,
     semantic_shield: SemanticShieldLike | None = None,
+    classifier_shield: ClassifierShieldLike | None = None,
 ) -> PipelineResult:
     """Backward-compatible wrapper for the historical pipeline name."""
     return run_guardrail_pipeline(
         raw_prompt,
         semantic_shield=semantic_shield,
+        classifier_shield=classifier_shield,
     )

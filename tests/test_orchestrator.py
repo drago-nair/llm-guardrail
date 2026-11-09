@@ -50,14 +50,52 @@ class FakeSemanticShield:
         )
 
 
+@dataclass
+class FakeClassifierResult:
+    model_label: str
+    benign_score: float
+    malicious_score: float
+    confidence: float
+    model_name: str = "fake/classifier"
+    model_revision: str | None = "fake-revision"
+
+
+class FakeClassifierShield:
+    def __init__(
+        self,
+        malicious_score: float = 0.0,
+        error: Exception | None = None,
+    ):
+        self.malicious_score = malicious_score
+        self.error = error
+        self.scanned_prompts: list[str] = []
+
+    def scan(self, prompt: str) -> FakeClassifierResult:
+        self.scanned_prompts.append(prompt)
+
+        if self.error is not None:
+            raise self.error
+
+        is_malicious = self.malicious_score >= 0.5
+
+        return FakeClassifierResult(
+            model_label="LABEL_1" if is_malicious else "LABEL_0",
+            benign_score=1.0 - self.malicious_score,
+            malicious_score=self.malicious_score,
+            confidence=max(self.malicious_score, 1.0 - self.malicious_score),
+        )
+
+
 def test_orchestrator_valid_clean_prompt():
-    """Verifies a standard query passes all five gates."""
+    """Verifies a standard query passes all six gates."""
     shield = FakeSemanticShield()
+    classifier = FakeClassifierShield()
     prompt = "How do I implement binary search in Python?"
 
     result = run_guardrail_pipeline(
         prompt,
         semantic_shield=shield,
+        classifier_shield=classifier,
     )
 
     assert result.is_allowed is True
@@ -66,6 +104,7 @@ def test_orchestrator_valid_clean_prompt():
     assert result.anonymization_vault == {}
     assert result.audit_flags == []
     assert shield.scanned_prompts == [prompt]
+    assert classifier.scanned_prompts == [prompt]
 
 
 def test_orchestrator_empty_input_rejected_before_semantic_gate():
@@ -125,8 +164,9 @@ def test_orchestrator_direct_keyword_rejected_before_semantic_gate():
 
 
 def test_orchestrator_pii_is_masked_before_semantic_scan():
-    """Verifies Gate 5 sees tokens instead of original sensitive data."""
+    """Verifies Gates 5 and 6 see tokens instead of original sensitive data."""
     shield = FakeSemanticShield()
+    classifier = FakeClassifierShield()
     email = "dev@company.com"
     api_key = "ghp_111122223333444455556666777788889999"
     payload = f"Contact {email} with token {api_key}."
@@ -134,6 +174,7 @@ def test_orchestrator_pii_is_masked_before_semantic_scan():
     result = run_guardrail_pipeline(
         payload,
         semantic_shield=shield,
+        classifier_shield=classifier,
     )
 
     assert result.is_allowed is True
@@ -149,6 +190,7 @@ def test_orchestrator_pii_is_masked_before_semantic_scan():
     assert shield.scanned_prompts == [result.processed_prompt]
     assert email not in shield.scanned_prompts[0]
     assert api_key not in shield.scanned_prompts[0]
+    assert classifier.scanned_prompts == [result.processed_prompt]
 
 
 def test_orchestrator_zero_width_smuggled_attack():
@@ -292,6 +334,98 @@ def test_default_semantic_shield_is_created_once(monkeypatch):
     assert creation_count == 1
 
 
+def test_orchestrator_classifier_attack_blocked():
+    """Verifies Gate 6 blocks a prompt the classifier scores as malicious."""
+    shield = FakeSemanticShield()
+    classifier = FakeClassifierShield(malicious_score=0.95)
+    prompt = "Explain binary search in Python."
+
+    result = run_guardrail_pipeline(
+        prompt,
+        semantic_shield=shield,
+        classifier_shield=classifier,
+    )
+
+    assert result.is_allowed is False
+    assert "Classifier Gate" in result.rejection_reason
+    assert any(
+        "CLASSIFIER_ATTACK_BLOCKED" in flag
+        for flag in result.audit_flags
+    )
+
+
+def test_orchestrator_classifier_review_flagged_but_allowed():
+    """Verifies a REVIEW-band classifier score is flagged but still allowed."""
+    shield = FakeSemanticShield()
+    classifier = FakeClassifierShield(malicious_score=0.20)
+    prompt = "Explain binary search in Python."
+
+    result = run_guardrail_pipeline(
+        prompt,
+        semantic_shield=shield,
+        classifier_shield=classifier,
+    )
+
+    assert result.is_allowed is True
+    assert any(
+        "CLASSIFIER_REVIEW_FLAGGED" in flag
+        for flag in result.audit_flags
+    )
+
+
+def test_orchestrator_classifier_failure_fails_closed():
+    """Verifies a broken classifier model cannot silently allow a prompt."""
+    shield = FakeSemanticShield()
+    classifier = FakeClassifierShield(
+        error=RuntimeError("simulated model failure")
+    )
+
+    result = run_guardrail_pipeline(
+        "Explain binary search in Python.",
+        semantic_shield=shield,
+        classifier_shield=classifier,
+    )
+
+    assert result.is_allowed is False
+    assert "fail-closed policy" in result.rejection_reason
+    assert any(
+        "CLASSIFIER_GATE_ERROR (RuntimeError)" in flag
+        for flag in result.audit_flags
+    )
+
+
+def test_default_classifier_shield_is_created_once(monkeypatch):
+    """Verifies lazy initialization reuses one shared classifier instance."""
+    creation_count = 0
+
+    class CountingClassifierShield:
+        def __init__(self):
+            nonlocal creation_count
+            creation_count += 1
+
+    fake_module = types.ModuleType(
+        "sentinel_guard.classifier_shield"
+    )
+    fake_module.ClassifierShield = CountingClassifierShield
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentinel_guard.classifier_shield",
+        fake_module,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_default_classifier_shield",
+        None,
+    )
+
+    first_instance = orchestrator._get_default_classifier_shield()
+    second_instance = orchestrator._get_default_classifier_shield()
+
+    assert first_instance is second_instance
+    assert creation_count == 1
+
+
 def test_historical_pipeline_name_remains_compatible():
     """Verifies existing callers can continue using the old function name."""
     prompt = "Explain binary search in Python."
@@ -299,10 +433,12 @@ def test_historical_pipeline_name_remains_compatible():
     new_result = run_guardrail_pipeline(
         prompt,
         semantic_shield=FakeSemanticShield(),
+        classifier_shield=FakeClassifierShield(),
     )
     historical_result = run_deterministic_pipeline(
         prompt,
         semantic_shield=FakeSemanticShield(),
+        classifier_shield=FakeClassifierShield(),
     )
 
     assert historical_result == new_result
