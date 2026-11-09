@@ -12,13 +12,16 @@ description = "CPU-efficient security and sanitization pipeline for LLM prompts.
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi==0.162.2",
     "sentence-transformers==6.0.1",
     "torch==2.14.0",
     "transformers==5.17.0",
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx==0.28.1",
     "pytest==9.1.1",
 ]
 
