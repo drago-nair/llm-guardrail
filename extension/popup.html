@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LLM Guardrail</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>LLM Guardrail</h1>
+
+    <label for="api-key-input">API key:</label>
+    <input
+      id="api-key-input"
+      type="password"
+      placeholder="Enter the server's GUARDRAIL_API_KEY"
+    />
+
+    <textarea
+      id="prompt-input"
+      placeholder="Paste the prompt you're about to send to an LLM..."
+      rows="6"
+    ></textarea>
+
+    <button id="check-button">Check</button>
+
+    <div id="result" class="hidden">
+      <div id="verdict-badge"></div>
+      <p id="rejection-reason" class="hidden"></p>
+
+      <label for="output-text">Cleaned prompt:</label>
+      <textarea id="output-text" rows="6" readonly></textarea>
+      <button id="copy-button">Copy cleaned prompt</button>
+    </div>
+
+    <p id="error-message" class="hidden">
+      Could not reach LLM Guardrail locally. Is the API running
+      (<code>uvicorn sentinel_guard.api:app</code>) on port 8000?
+    </p>
+
+    <p id="auth-error-message" class="hidden">
+      Rejected: missing or wrong API key. Check the key above against
+      the server's <code>GUARDRAIL_API_KEY</code>.
+    </p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
